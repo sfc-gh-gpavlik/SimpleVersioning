@@ -14,8 +14,6 @@
 *  implied. See the License for the specific language governing permissions and limitations under the   *
 *  License.                                                                                             *
 *                                                                                                       *
-*  Copyright (c) 2020 Snowflake Computing Inc. All rights reserved.                                     *
-*                                                                                                       *
 ********************************************************************************************************/
 
 -- Recommended to keep version history in its own schema
