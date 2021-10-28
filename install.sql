@@ -20,11 +20,11 @@
 
 -- Recommended to keep version history in its own schema
 use database UTIL_DB;
-create or replace schema VERSIONING;
-
+create schema VERSIONING;  -- Note: Do not use "create or replace" to avoid losing your version history.
+                           -- If you do accidentally, the Time Travel is set to 90 days for recovery.
 
 -- This table holds the version history
-create or replace table VERSION_HISTORY
+create table VERSION_HISTORY
 (
    ID string           default uuid_string()
   ,OBJECT_TYPE         string
@@ -35,9 +35,8 @@ create or replace table VERSION_HISTORY
   ,COMMIT_COMMENTS     string
   ,EFFECTIVE_TIMESTAMP timestamp_tz
   ,OBSOLETE_TIMESTAMP  timestamp_tz
-  ,ORIGINAL_OWNER      string
   ,DESCRIPTION         string
-);
+) DATA_RETENTION_TIME_IN_DAYS = 90;         -- Note... If you get an error that this is not supported, change to 1
 
 -- This procedure will version the objects.
 create or replace procedure VERSION(COMMIT_COMMENTS string, OBJECT_TYPE string, OBJECT_PATH string)
@@ -80,28 +79,19 @@ for (var i = 0; i < 3; i++) {
         objectToVersion[i] = objectToVersion[i].toUpperCase();
     }
 }
-
 objectType = OBJECT_TYPE.trim().toUpperCase();
-
 var version = 1;
-
 var sql = getCurrentVersionSQL(objectType, objectToVersion[DATABASE_PATH], objectToVersion[SCHEMA_PATH], objectToVersion[NAME_PATH],
                                VERSIONING_DATABASE, VERSIONING_SCHEMA, VERSIONING_TABLE);
 var rs = getResultSet(sql);
-
 if (rs.next()) {
-
     // Get the next version number
     version = rs.getColumnValue("VERSION") + 1;
-
     //Invalidate old version
     oldID = rs.getColumnValue("ID");
     executeNonQuery(`update "${VERSIONING_DATABASE}"."${VERSIONING_SCHEMA}"."${VERSIONING_TABLE}" set OBSOLETE_TIMESTAMP = '${currentTimestamp}' where ID = '${oldID}'`);
-
 }
-
 try {
-
     if (objectType.localeCompare("PROCEDURE") == 0 || objectType.localeCompare("FUNCTION") == 0) {
         rs = getResultSet(` select get_ddl('${objectType}', '"${objectToVersion[DATABASE_PATH]}"."${objectToVersion[SCHEMA_PATH]}".${objectToVersion[NAME_PATH]}') as DDL `);
     } else {
@@ -110,15 +100,12 @@ try {
 } catch(e) {
     return "Error attempting to get DDL for the object to version: " + e.message;
 }
-
 if (rs.next()) {
-
     var ddl = rs.getColumnValue("DDL");
     
     if (objectType.localeCompare("PROCEDURE") == 0 || objectType.localeCompare("FUNCTION") == 0) {
         ddl = getProceduralDDL(ddl);
     }
-
     sql = getInsertVersionSQL(objectType,
                           objectToVersion[DATABASE_PATH],
                           objectToVersion[SCHEMA_PATH],
@@ -131,13 +118,10 @@ if (rs.next()) {
                           getSingleQuoted(ddl));  // This is where to get the get_ddl
     executeNonQuery(sql);
 }
-
 return `Added version ${version} of ${objectType} "${objectToVersion[DATABASE_PATH]}"."${objectToVersion[SCHEMA_PATH]}"."${objectToVersion[NAME_PATH]}".`;
-
 /***************************************************************************************************
 *  Helper functions                                                                                *
 ***************************************************************************************************/
-
 function getProceduralDDL(ddlCode) {
     let lines = ddlCode.split("\n");
     let out = "";
@@ -172,11 +156,9 @@ function getProceduralDDL(ddlCode) {
     }
     return out;
 }
-
 /***************************************************************************************************
 *  SQL templates                                                                                   *
 ***************************************************************************************************/
-
 function getInsertVersionSQL(objectType,
                             objectDatabase,
                             objectSchema,
@@ -187,7 +169,6 @@ function getInsertVersionSQL(objectType,
                             currentTimestamp,
                             commitComments,
                             description) {
-
 sql = 
 `
 insert  into "${versionDatabase}"."${versionSchema}"."${versionTable}" 
@@ -199,7 +180,6 @@ insert  into "${versionDatabase}"."${versionSchema}"."${versionTable}"
     VERSION,
     EFFECTIVE_TIMESTAMP,
     COMMIT_COMMENTS,
-    ORIGINAL_OWNER,
     DESCRIPTION
     )
 values
@@ -211,15 +191,12 @@ values
      ${version},
     '${currentTimestamp}',
     '${commitComments}',
-     null,
      '${description}'
     );
 `;
 return sql;
 }
-
 function getCurrentVersionSQL(objectType, objectDatabase, objectSchema, objectName, versionDatabase, versionSchema, versionTable){
-
 var sql = 
 `
 select  * 
@@ -230,14 +207,11 @@ where   OBJECT_TYPE         = '${objectType}' and
         OBJECT_NAME         = '${objectName}' and
         OBSOLETE_TIMESTAMP is null
 ;`;
-
 return sql;
 }
-
 /***************************************************************************************************
 *  SQL functions                                                                                   *
 ***************************************************************************************************/
-
 function getResultSet(sql){
     cmd1 = {sqlText: sql};
     stmt = snowflake.createStatement(cmd1);
@@ -245,7 +219,6 @@ function getResultSet(sql){
     rs = stmt.execute();
     return rs;
 }
-
 function executeNonQuery(queryString) {
     var out = '';
     cmd1 = {sqlText: queryString};
@@ -253,10 +226,18 @@ function executeNonQuery(queryString) {
     var rs;
     rs = stmt.execute();
 }
-
 function getSingleQuoted(str) {
     return str.replace(/'/g, "''");
 }
 $$;
+    
+-- Version the table:
+call version('Initial commit', 'table', 'UTIL_DB.VERSIONING.VERSION_HISTORY');
       
+      
+-- Version the stored procedure (note that it must include both the fully-qualified name and parameters types)      
 call version('Initial commit', 'procedure', 'UTIL_DB.VERSIONING.VERSION(string, string, string)');
+      
+      
+-- See the results:
+select * from "UTIL_DB"."VERSIONING"."VERSION_HISTORY";
